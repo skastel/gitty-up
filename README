@@ -1,4 +1,4 @@
-##GittyUp
+# GittyUp
 
 Manage your various git-svn repos and maintain an up to date clone of
 the master SVN repo. By default, the script assumes you have the a
