@@ -7,10 +7,10 @@ use
 
 @author: stephen.huenneke@opower.com
 
-# Requirements
+## Requirements
 The only requirement is a vanilla install of Python 2.7.
 
-# Usage:
+## Usage:
     Manage your local git-svn repos [-h] [-r REPO_URL] [-p REPO_PATH]
                                        [-d REPO_DIR] [-n] [-u] [-f]
                                        [--check-for-changes]
@@ -41,7 +41,7 @@ The only requirement is a vanilla install of Python 2.7.
       -s SKIP_DIRS, --skip-dir SKIP_DIRS
                             Skip all directory paths that match this arg
 
-# Examples:
+## Examples:
 
 Update repos on a path:
 
