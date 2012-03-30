@@ -1,0 +1,151 @@
+#!/usr/bin/env python
+
+"""
+This script basically walks through you local source tree and updates things.  You can pass flags to fetch branches, to update from svn and it should be pretty clean overall.
+
+@author stephen.huenneke@opower.com
+"""
+
+import os
+import argparse
+import re
+import subprocess
+import logging
+import clr_utils
+from svn_utils import SvnRepo
+from git_svn_utils import GitSvnRepo
+
+def clone_svn_project(log, svnRepo, local_dir, svn_path):
+    do_checkout = clr_utils.prompt_user_boolean("Would you like to check out %s? [Y/n]: " % svn_path, True)
+    if not do_checkout:
+        return
+    do_shallow_copy = clr_utils.prompt_user_boolean("Shallow copy (full history copy might take a long time)? [Y/n]: ", True)
+    git_clone_command = "git svn clone -s"
+    if do_shallow_copy:
+        svn_info = svnRepo.get_svn_info(svn_path + "/trunk")
+        if not svn_info:
+            log.error("No trunk for project %s, no copy." % svn_path)
+            return
+        m = re.search('Last Changed Rev: ([0-9]+)',svn_info)
+        last_rev = m.group(1)
+        git_clone_command += " -r%s:HEAD" % last_rev
+    git_clone_command += " $R/%s" % svn_path
+    log.debug("Ready to execute: '%s'" % git_clone_command)
+    os.chdir(local_dir)
+    result = subprocess.call(git_clone_command, shell=True)
+    if result != 0:
+        # A problem occured! Eep!
+        log.error("Error cloning project with command: '%s'" % git_clone_command)
+        exit(1)
+
+def check_for_missing_paths(log, args, svnRepo, repos, svn_path, local_path):
+    svn_dirs = svnRepo.get_svn_subdirs(svn_path)
+    local_dirs = os.listdir(local_path)
+    for svn_dir in svn_dirs:
+        svn_dir = svn_dir.rstrip("/")
+        new_svn_path = os.path.join(svn_path,svn_dir)
+        local_dir_path = os.path.join(local_path, svn_dir)
+
+        if svn_dir in args.skip_dirs:
+            log.debug("Skipping %s" % svn_dir)
+            continue
+
+        if svn_dir not in local_dirs:
+            log.debug("Your local repo %s is missing '%s'!" % (local_path, svn_dir))
+            new_sub_dirs = svnRepo.get_svn_subdirs(new_svn_path)
+            if any(x in new_sub_dirs for x in ['tags/','branches/','trunk/']):
+                clone_svn_project(log, svnRepo, local_path, new_svn_path)
+                continue
+            else:
+                do_create_dir = raw_input("Would you like me to create %s for you? [Y/n]: " % new_svn_path)
+                if not do_create_dir or do_create_dir.lower()[0] == "y":
+                    os.mkdir(local_dir_path)
+                else:
+                    continue
+        else:
+            log.debug("You've already got %s" % local_dir_path)
+            if local_dir_path in repos:
+                log.debug("No need to recurse to %s." % local_dir_path)
+                continue
+        log.debug("Recurse! To %s and %s!" % (new_svn_path, local_dir_path))
+        check_for_missing_paths(log, args, svnRepo, repos, new_svn_path, local_dir_path)
+
+def find_git_dirs(directory, log):
+    if os.path.isdir(os.path.join(directory, '.git')):
+        return [directory]
+    log.debug("Checking %s\nIgnoring %s" % (directory, args.skip_dirs))
+    found_repos = []
+
+    for dirpath, dirnames, filenames in os.walk(directory):
+        for dirname in dirnames[:]:
+            if dirname in args.skip_dirs:
+                log.debug("Ignoring %s" % dirname)
+                dirnames.remove(dirname)
+                continue
+            full_dir_path = os.path.join(dirpath,dirname)
+            if '.git' in os.listdir(full_dir_path):
+                dirnames.remove(dirname)
+                found_repos.append(full_dir_path)
+            else:
+                log.debug("Nothing in %s" % full_dir_path)
+    return found_repos
+
+def setup_log(args):
+    log = logging.getLogger("")
+    log.setLevel(logging.DEBUG)
+
+    #Setup console output.
+    log_handle = logging.StreamHandler()
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    log_handle.setFormatter(formatter)
+    if args.verbose:
+        log_handle.setLevel(logging.DEBUG)
+    else:
+        log_handle.setLevel(logging.INFO)
+    log.addHandler(log_handle)
+    return log
+
+def main(args):
+    log = setup_log(args)
+    repo_full_path = os.path.join(args.repo_dir,args.repo_path)
+    svn = SvnRepo(log, args)
+    repos = find_git_dirs(repo_full_path, log)
+    if args.find_new_projects:
+        print "Found git-svn repos: %s" % repos
+        check_for_missing_paths(log, args, svn, repos, args.repo_path, repo_full_path)
+
+    if any([args.update, args.fetch, args.check_for_unpublished, args.check_for_changes]):
+        for repo_path in repos:
+            repo = GitSvnRepo(repo_path, log, args)
+            if args.check_for_changes:
+                if repo.has_changes():
+                    log.info("%s has uncommitted changes." % repo_path)
+
+            if args.check_for_unpublished:
+                repo.get_unpushed_commits()
+
+            if args.fetch:
+                repo.fetch_svn_branches()
+
+            if args.update:
+                repo.update_git_svn()
+        
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser('Manage your local git-svn repos')
+    parser.add_argument('-r', '--svn-url', dest='repo_url', default=os.environ["R"], help="The url of the remote svn repo, defaults to the $R shell variable")
+    parser.add_argument('-p', '--path', dest='repo_path', default="", help="The path from the root svn/local repo path")
+    parser.add_argument('-d', '--local-dir', dest='repo_dir', default=os.environ["workspace"], help="The path to your local repo, defaults to the $workspace shell variable")
+    parser.add_argument('-n', '--find-new-projects', dest='find_new_projects', action='store_true', default=False)
+    parser.add_argument('-u', '--update', dest='update', action='store_true', default=False)
+    parser.add_argument('-f', '--fetch', dest='fetch', action='store_true', default=False)
+    parser.add_argument('--check-for-changes', dest='check_for_changes', action='store_true', default=False)
+    parser.add_argument('--check-for-unpublished', dest='check_for_unpublished', action='store_true', default=False)
+    parser.add_argument('--max-lookback-revisions', dest='max_revisions', default=10, help="Used in conjuction with check-for-unpublished, specifies a maximum number of past revisions to examine, default is 10.")
+    parser.add_argument('-v', '--verbose', dest='verbose', action='store_true', default=False)
+    parser.add_argument('-s', '--skip-dir', dest='skip_dirs', action='append', default=['www-posnet','www-static','www-faqs','alerts_data','.metadata','data'], help="Skip all directory paths that match this arg")
+    args = parser.parse_args()
+
+    if args.repo_dir[0] == '~':
+        args.repo_dir = os.path.expanduser(args.repo_dir)
+    main(args)
