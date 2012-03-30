@@ -3,7 +3,7 @@
 Manage your various git-svn repos and maintain an up to date clone of
 the master SVN repo. By default, the script assumes you have the a
 shell alias of $R to your svn remote repo, if you don't you can always
-use
+use the --svn-url argument.
 
 @author: stephen.huenneke@opower.com
 
