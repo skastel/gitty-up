@@ -78,12 +78,4 @@ class GitSvnRepo:
         self._log.debug("Status:\n%s", git_status)
         return True
 
-    def check_for_updates(self):
-        self._log.error("TODO: make this actually look for unstaged changes.")
-        return
-
-    def check_for_dcommits(self):
-        self._log.error("TODO: make this actually look for dcommits.")
-        return
-
 
