@@ -44,7 +44,7 @@ class GitSvnRepo:
             # A problem occured! Eep!
             self._log.error("Error rebasing %s" % self._directory)
             exit(result)
-
+            
     def update_git_svn(self):
         os.chdir(self._directory)
         local_changes = self.has_changes()
@@ -71,8 +71,11 @@ class GitSvnRepo:
         os.chdir(self._directory)
         self._log.debug("Checking for changes in %s" % self._directory)
         git_status = subprocess.Popen('git status', shell=True, stdout=subprocess.PIPE).stdout.read()
-        if re.search('working directory clean', git_status):
+        if not re.search('Changes[\s\w]+commit[\s\w]*:', git_status, re.M):
+            self._log.debug("No changes staged or uncommitted on %s" % self._directory)
             return False
+        self._log.debug("Found changes staged or uncommitted on %s" % self._directory)
+        self._log.debug("Status:\n%s", git_status)
         return True
 
     def check_for_updates(self):
