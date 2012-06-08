@@ -37,10 +37,29 @@ def clone_svn_project(log, svnRepo, local_dir, svn_path):
         # A problem occured! Eep!
         log.error("Error cloning project with command: '%s'" % git_clone_command)
         exit(1)
+    
+def create_directory_or_checkout(log, svn_repo, svn_dir, svn_path, local_path):
+    local_dir_path = os.path.join(local_path, svn_dir)
 
-def check_for_missing_paths(log, args, svnRepo, repos, svn_path, local_path):
-    svn_dirs = svnRepo.get_svn_subdirs(svn_path)
-    local_dirs = os.listdir(local_path)
+    new_sub_dirs = svn_repo.get_svn_subdirs(svn_path)
+    if any(x in new_sub_dirs for x in ['tags/','branches/','trunk/']):
+        clone_svn_project(log, svn_repo, local_path, svn_path)
+        return False
+    else:
+        do_create_dir = raw_input("Would you like me to create %s for you? [Y/n]: " % svn_path)
+        if not do_create_dir or do_create_dir.lower()[0] == "y":
+            os.mkdir(local_dir_path)
+        else:
+            return False
+    return True
+
+def check_for_missing_paths(log, args, svn_repo, repos, svn_path, local_path):
+    svn_dirs = svn_repo.get_svn_subdirs(svn_path)
+    local_dirs = list()
+    if os.path.isdir(local_path):
+        local_dirs = os.listdir(local_path)
+    log.debug("Found subdirs=%s" % svn_dirs)
+
     for svn_dir in svn_dirs:
         svn_dir = svn_dir.rstrip("/")
         new_svn_path = os.path.join(svn_path,svn_dir)
@@ -52,25 +71,19 @@ def check_for_missing_paths(log, args, svnRepo, repos, svn_path, local_path):
 
         if svn_dir not in local_dirs:
             log.debug("Your local repo %s is missing '%s'!" % (local_path, svn_dir))
-            new_sub_dirs = svnRepo.get_svn_subdirs(new_svn_path)
-            if any(x in new_sub_dirs for x in ['tags/','branches/','trunk/']):
-                clone_svn_project(log, svnRepo, local_path, new_svn_path)
+            if not create_directory_or_checkout(log, svn_repo, svn_dir, new_svn_path, local_path):
                 continue
-            else:
-                do_create_dir = raw_input("Would you like me to create %s for you? [Y/n]: " % new_svn_path)
-                if not do_create_dir or do_create_dir.lower()[0] == "y":
-                    os.mkdir(local_dir_path)
-                else:
-                    continue
         else:
             log.debug("You've already got %s" % local_dir_path)
             if local_dir_path in repos:
                 log.debug("No need to recurse to %s." % local_dir_path)
                 continue
         log.debug("Recurse! To %s and %s!" % (new_svn_path, local_dir_path))
-        check_for_missing_paths(log, args, svnRepo, repos, new_svn_path, local_dir_path)
+        check_for_missing_paths(log, args, svn_repo, repos, new_svn_path, local_dir_path)
 
 def find_git_dirs(directory, log):
+    if not os.path.isdir(directory):
+        return []
     if os.path.isdir(os.path.join(directory, '.git')):
         return [directory]
     log.debug("Checking %s\nIgnoring %s" % (directory, args.skip_dirs))
@@ -107,34 +120,35 @@ def setup_log(args):
 
 def main(args):
     log = setup_log(args)
-    repo_full_path = os.path.join(args.repo_dir,args.repo_path)
-    svn = SvnRepo(log, args)
-    repos = find_git_dirs(repo_full_path, log)
-    if args.find_new_projects:
-        print "Found git-svn repos: %s" % repos
-        check_for_missing_paths(log, args, svn, repos, args.repo_path, repo_full_path)
+    for repo_path in args.repo_paths:
+        repo_full_path = os.path.join(args.repo_dir,repo_path)
+        svn = SvnRepo(log, args)
+        repos = find_git_dirs(repo_full_path, log)
+        if args.find_new_projects:
+            print "Found git-svn repos: %s" % repos
+            check_for_missing_paths(log, args, svn, repos, repo_path, repo_full_path)
 
-    if any([args.update, args.fetch, args.check_for_unpublished, args.check_for_changes]):
-        for repo_path in repos:
-            repo = GitSvnRepo(repo_path, log, args)
-            if args.check_for_changes:
-                if repo.has_changes():
-                    log.info("%s has uncommitted changes." % repo_path)
+        if any([args.update, args.fetch, args.check_for_unpublished, args.check_for_changes]):
+            for repo_sub_path in repos:
+                repo = GitSvnRepo(repo_sub_path, log, args)
+                if args.check_for_changes:
+                    if repo.has_changes():
+                        log.info("%s has uncommitted changes." % repo_sub_path)
 
-            if args.check_for_unpublished:
-                repo.get_unpushed_commits()
+                if args.check_for_unpublished:
+                    repo.get_unpushed_commits()
 
-            if args.fetch:
-                repo.fetch_svn_branches()
+                if args.fetch:
+                    repo.fetch_svn_branches()
 
-            if args.update:
-                repo.update_git_svn()
+                if args.update:
+                    repo.update_git_svn()
         
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser('Manage your local git-svn repos')
     parser.add_argument('-r', '--svn-url', dest='repo_url', default=os.environ["R"], help="The url of the remote svn repo, defaults to the $R shell variable")
-    parser.add_argument('-p', '--path', dest='repo_path', default="", help="The path from the root svn/local repo path")
+    parser.add_argument('-p', '--paths', dest='repo_paths', nargs="+",default="", help="Paths from the root svn/local repo path")
     parser.add_argument('-d', '--local-dir', dest='repo_dir', default=os.environ["workspace"], help="The path to your local repo, defaults to the $workspace shell variable")
     parser.add_argument('-n', '--find-new-projects', dest='find_new_projects', action='store_true', default=False)
     parser.add_argument('-u', '--update', dest='update', action='store_true', default=False)
